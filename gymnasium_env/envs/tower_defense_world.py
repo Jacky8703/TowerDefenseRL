@@ -22,15 +22,16 @@ class TowerDefenseWorldEnv(gym.Env):
         self.action_types = self.game_info["actions"]
         self.tower_types = self.game_info["towers"]
         cell_size = self.game_info["map"]["cell_size"]
-        map_horizontal_cells = int(self.game_info["map"]["width"] / cell_size)
-        map_vertical_cells = int(self.game_info["map"]["height"] / cell_size)
+        self.map_horizontal_cells = int(self.game_info["map"]["width"] / cell_size)
+        self.map_vertical_cells = int(self.game_info["map"]["height"] / cell_size)
 
-        self.action_space = spaces.MultiDiscrete([len(self.action_types), len(self.tower_types), map_horizontal_cells, map_vertical_cells]) # action, tower type, x, y 
+        self.action_space = spaces.MultiDiscrete([len(self.action_types), len(self.tower_types), self.map_horizontal_cells, self.map_vertical_cells]) # action, tower type, x, y 
 
-        self.max_towers = int(map_horizontal_cells * map_vertical_cells - self.game_info["map"]["path_length"] / cell_size)
+        self.path_cells_coordinates_normalized = self.__normalize_path_cells()
+        self.max_towers = int(self.map_horizontal_cells * self.map_vertical_cells - self.game_info["map"]["path_length"] / cell_size)
         self.max_enemies = self.__calculate_total_enemies()
 
-        self.global_feature_count = 4 # game time, wave number, money, game over
+        self.global_feature_count = 4+len(self.path_cells_coordinates_normalized) # game time, wave number, money, game over, path cells coordinates
         self.features_per_tower = 4+len(self.tower_types) # active, x, y, attack cooldown, one-hot encoding type
         self.tower_feature_count = self.max_towers * self.features_per_tower
         self.features_per_enemy = 5+len(self.game_info["waves"]["enemy_types"]) # active, x, y, health, path progress, one-hot encoding type
@@ -56,6 +57,7 @@ class TowerDefenseWorldEnv(gym.Env):
         self.game_state = response.json()
         observation = self.__get_observation()
         info = self.__get_info()
+
         return observation, info
 
     # perform the action and return the new observation, reward, terminated, truncated, info
@@ -77,8 +79,8 @@ class TowerDefenseWorldEnv(gym.Env):
         reward = self.__calculate_reward(new_game_state)
         self.game_state = new_game_state
         observation = self.__get_observation()
-        terminated = new_game_state["gameOver"]
-        truncated = False
+        terminated = new_game_state["gameOver"] or new_game_state["waveNumber"] >= self.game_info["max_global_info"]["waveNumber"] or new_game_state["money"] >= self.game_info["max_global_info"]["money"]
+        truncated = new_game_state["gameTime"] >= self.game_info["max_global_info"]["gameTime"]
         info = self.__get_info()
 
         return observation, reward, terminated, truncated, info
@@ -101,20 +103,6 @@ class TowerDefenseWorldEnv(gym.Env):
     def close(self):
         pass
 
-    # Worst case (assuming enemies remain alive, max number of enemies per wave and the slower spawns last):
-    # - Time between waves: T = wave delay + max enemies per wave * spawn delay
-    # - Number of actual waves: N = slower enemy time to complete path / T
-    # - Number of total enemies: = N * max enemies per wave
-    def __calculate_total_enemies(self):
-        wave_delay = self.game_info["waves"]["wave_delay"]
-        wave_max_enemies = self.game_info["waves"]["max_enemies"]
-        spawn_delay = self.game_info["waves"]["spawn_delay"]
-        slower_enemy_time = self.game_info["map"]["path_length"] / self.game_info["waves"]["slower_enemy_sample"]["currentSpeed"]
-        total_enemies = int(slower_enemy_time*wave_max_enemies/(wave_delay+spawn_delay*wave_max_enemies))
-        if slower_enemy_time < wave_delay:
-            total_enemies = wave_max_enemies
-        return total_enemies
-
     # encodes the self game state into a tensor of shape self.observation_space.shape
     def __get_observation(self):
         shape = self.observation_space.shape
@@ -127,6 +115,7 @@ class TowerDefenseWorldEnv(gym.Env):
         observation[1] = self.game_state["waveNumber"] / self.game_info["max_global_info"]["waveNumber"]
         observation[2] = self.game_state["money"] / self.game_info["max_global_info"]["money"]
         observation[3] = self.game_state["gameOver"]
+        observation[4:4+len(self.path_cells_coordinates_normalized)] = self.path_cells_coordinates_normalized
 
         # tower features normalized
         for idx, tower in enumerate(self.game_state["towers"]):
@@ -149,10 +138,51 @@ class TowerDefenseWorldEnv(gym.Env):
 
         return observation
     
+    # create an action mask to disable illegal actions
+    def __get_action_mask(self):
+        action_type_mask = np.ones(len(self.action_types), dtype=bool)
+        tower_type_mask = np.ones(len(self.tower_types), dtype=bool)
+        x_coordinate_mask = np.ones(self.map_horizontal_cells, dtype=bool)
+        y_coordinate_mask = np.ones(self.map_vertical_cells, dtype=bool)
+
+        # disable building towers if not enough money
+        cheapest_tower_type = min(self.tower_types, key=lambda t: t["cost"])
+        if self.game_state["money"] < cheapest_tower_type["cost"]:
+            action_type_mask[1] = False # 1 = BUILD_TOWER
+
+        # disable building towers if they cost too much or are locked
+        for idx, tower in enumerate(self.tower_types):
+            if self.game_state["money"] < tower["cost"] or self.game_state["waveNumber"] < tower["unlock_wave"]:
+                tower_type_mask[idx] = False
+
+        # for illegal coordinates I can't disable the action directly because the mask is applied per-dimension so I would disable all horizontal or vertical cells
+        return [action_type_mask, tower_type_mask, x_coordinate_mask, y_coordinate_mask]
+
     # additional info for debugging or logging, currently empty
     def __get_info(self):
-        info = {}
+        info = {"action_mask": self.__get_action_mask()}
         return info
+
+    def __normalize_path_cells(self):
+        normalized_coordinates = []
+        for cell in self.game_info["map"]["path_cells"]:
+            normalized_coordinates.append(cell["x"] / self.game_info["map"]["width"])
+            normalized_coordinates.append(cell["y"] / self.game_info["map"]["height"])
+        return normalized_coordinates
+
+    # Worst case (assuming enemies remain alive, max number of enemies per wave and the slower spawns last):
+    # - Time between waves: T = wave delay + max enemies per wave * spawn delay
+    # - Number of actual waves: N = slower enemy time to complete path / T
+    # - Number of total enemies: = N * max enemies per wave
+    def __calculate_total_enemies(self):
+        wave_delay = self.game_info["waves"]["wave_delay"]
+        wave_max_enemies = self.game_info["waves"]["max_enemies"]
+        spawn_delay = self.game_info["waves"]["spawn_delay"]
+        slower_enemy_time = self.game_info["map"]["path_length"] / self.game_info["waves"]["slower_enemy_sample"]["currentSpeed"]
+        total_enemies = int(slower_enemy_time*wave_max_enemies/(wave_delay+spawn_delay*wave_max_enemies))
+        if slower_enemy_time < wave_delay:
+            total_enemies = wave_max_enemies
+        return total_enemies
     
     # calculate the rewards based on the new game state
     def __calculate_reward(self, new_game_state):
