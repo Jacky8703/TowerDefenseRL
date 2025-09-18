@@ -7,8 +7,8 @@ from sb3_contrib import MaskablePPO
 from gymnasium_env.wrappers.wrap import wrap_env
 from custom_callbacks.tensor_board_info import TensorboardInfoCallback
 
-mean_time_fps = 320 # ~mean time/fps from tensor board, steps per second
-mean_episode_steps = 1500 # ~mean steps per episode from tensor board
+mean_time_fps = 320 # ~mean time/fps from tensor board, steps per second (obviously varies)
+mean_episode_steps = 1500 # ~mean steps per episode from tensor board (also varies and it depends on the hours_to_play)
 
 hours_to_play = 1
 video_number = 10 # number of videos to record during training
@@ -46,8 +46,9 @@ try:
     model = MaskablePPO("MlpPolicy", env, verbose=1, tensorboard_log=f"./logs/")
 
     logging.info("Starting model training...")
+    start = datetime.datetime.now()
     model.learn(total_timesteps=training_steps, callback=[checkpoint_callback, tensorboard_info_callback])
-    logging.info("Model training completed.")
+    logging.info(f"Model training completed in {(datetime.datetime.now() - start).total_seconds()/3600:.2f} hours ({hours_to_play} planned).")
 
     model.save(f"./models/{prefix}_maskable_ppo_tower_defense")
     logging.info("Model saved.")
