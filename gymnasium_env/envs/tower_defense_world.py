@@ -73,7 +73,8 @@ class TowerDefenseWorldEnv(gym.Env):
         if response.status_code != 200:
             print(f"Error during step: {response.text}")
             last_observation = self.__get_observation()
-            return last_observation, 0, False, True, {}
+            info = self.__get_info()
+            return last_observation, -5, False, False, info # small penalty for illegal action (building tower on path or in occupied cell)
 
         new_game_state = response.json()
         reward = self.__calculate_reward(new_game_state)
@@ -103,6 +104,26 @@ class TowerDefenseWorldEnv(gym.Env):
     def close(self):
         pass
 
+    # create an action mask to disable illegal actions
+    def action_masks(self):
+        action_type_mask = np.ones(len(self.action_types), dtype=bool)
+        tower_type_mask = np.ones(len(self.tower_types), dtype=bool)
+        x_coordinate_mask = np.ones(self.map_horizontal_cells, dtype=bool)
+        y_coordinate_mask = np.ones(self.map_vertical_cells, dtype=bool)
+
+        # disable building towers if not enough money
+        cheapest_tower_type = min(self.tower_types, key=lambda t: t["cost"])
+        if self.game_state["money"] < cheapest_tower_type["cost"]:
+            action_type_mask[1] = False # 1 = BUILD_TOWER
+
+        # disable building towers if they cost too much or are locked
+        for idx, tower in enumerate(self.tower_types):
+            if self.game_state["money"] < tower["cost"] or self.game_state["waveNumber"] < tower["unlock_wave"]:
+                tower_type_mask[idx] = False
+
+        # for illegal coordinates I can't disable the action directly because the mask is applied per-dimension so I would disable all horizontal or vertical cells
+        return [action_type_mask, tower_type_mask, x_coordinate_mask, y_coordinate_mask]
+    
     # encodes the self game state into a tensor of shape self.observation_space.shape
     def __get_observation(self):
         shape = self.observation_space.shape
@@ -137,30 +158,10 @@ class TowerDefenseWorldEnv(gym.Env):
             observation[offset+5+self.enemy_type_to_index[enemy["type"]]] = 1 # one-hot encoding type
 
         return observation
-    
-    # create an action mask to disable illegal actions
-    def __get_action_mask(self):
-        action_type_mask = np.ones(len(self.action_types), dtype=bool)
-        tower_type_mask = np.ones(len(self.tower_types), dtype=bool)
-        x_coordinate_mask = np.ones(self.map_horizontal_cells, dtype=bool)
-        y_coordinate_mask = np.ones(self.map_vertical_cells, dtype=bool)
-
-        # disable building towers if not enough money
-        cheapest_tower_type = min(self.tower_types, key=lambda t: t["cost"])
-        if self.game_state["money"] < cheapest_tower_type["cost"]:
-            action_type_mask[1] = False # 1 = BUILD_TOWER
-
-        # disable building towers if they cost too much or are locked
-        for idx, tower in enumerate(self.tower_types):
-            if self.game_state["money"] < tower["cost"] or self.game_state["waveNumber"] < tower["unlock_wave"]:
-                tower_type_mask[idx] = False
-
-        # for illegal coordinates I can't disable the action directly because the mask is applied per-dimension so I would disable all horizontal or vertical cells
-        return [action_type_mask, tower_type_mask, x_coordinate_mask, y_coordinate_mask]
 
     # additional info for debugging or logging, currently empty
     def __get_info(self):
-        info = {"action_mask": self.__get_action_mask()}
+        info = {}
         return info
 
     def __normalize_path_cells(self):
@@ -200,7 +201,7 @@ class TowerDefenseWorldEnv(gym.Env):
                 reward += count*2
                 if count == 0:
                     reward -= 30
-        # negative, spending money too often and game over
+        # negative, spending money too often and game over, for the illegal actions the penalty is given in step()
         if new_game_state["money"] < old_state["money"]:
             reward -= 4
         if new_game_state["gameOver"]:
@@ -217,5 +218,3 @@ class TowerDefenseWorldEnv(gym.Env):
             if distance < self.game_info["towers"][tower_index]["range"]:
                 count += 1
         return count
-
-env = TowerDefenseWorldEnv()
