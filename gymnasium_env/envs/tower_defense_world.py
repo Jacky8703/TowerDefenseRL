@@ -9,7 +9,7 @@ from gymnasium import spaces
 url = "http://localhost:3000/"
 
 class TowerDefenseWorldEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 10}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
     
     # define action_space and observation_space
     def __init__(self, render_mode="rgb_array"):
@@ -161,6 +161,10 @@ class TowerDefenseWorldEnv(gym.Env):
     # additional info for debugging or logging, currently empty
     def __get_info(self):
         info = {}
+        info["wave_number"] = self.game_state["waveNumber"]
+        info["tower_counts"] = {tower_type["type"]: 0 for tower_type in self.tower_types}
+        for tower in self.game_state["towers"]:
+            info["tower_counts"][tower["type"]] += 1
         return info
 
     def __normalize_path_cells(self):

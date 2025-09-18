@@ -4,6 +4,7 @@ import logging
 from stable_baselines3.common.callbacks import CheckpointCallback
 from sb3_contrib import MaskablePPO
 from gymnasium_env.wrappers.wrap import wrap_env
+from custom_callbacks.tensor_board_info import TensorboardInfoCallback
 
 mean_time_fps = 250 # mean time/fps from tensor board
 mean_episode_steps = 750 # mean steps per episode from tensor board
@@ -31,6 +32,8 @@ checkpoint_callback = CheckpointCallback(
   save_path="./checkpoints/",
   name_prefix="maskable_ppo_tower_defense",
 )
+# custom tensorboard callback to log wave number and tower counts
+tensorboard_info_callback = TensorboardInfoCallback()
 
 try:
     logging.info(f"--- Starting New Training Run ---")
@@ -41,7 +44,7 @@ try:
     model = MaskablePPO("MlpPolicy", env, verbose=1, tensorboard_log="./logs/")
 
     logging.info("Starting model training...")
-    model.learn(total_timesteps=training_steps, callback=checkpoint_callback)
+    model.learn(total_timesteps=training_steps, callback=[checkpoint_callback, tensorboard_info_callback])
     logging.info("Model training completed.")           
     
     model.save("maskable_ppo_tower_defense")
