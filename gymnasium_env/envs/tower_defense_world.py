@@ -49,7 +49,7 @@ class TowerDefenseWorldEnv(gym.Env):
         self.enemy_type_to_index = {enemy_type: idx for idx, enemy_type in enumerate(self.game_info["waves"]["enemy_types"])}
 
     # reset the environment and return the initial observation and info
-    def reset(self):
+    def reset(self, seed=None, options=None):
         response = requests.post(url + "reset")
         if response.status_code != 200:
             raise ConnectionError(f"Failed to reset game: {response.text}")
@@ -71,7 +71,6 @@ class TowerDefenseWorldEnv(gym.Env):
 
         response = requests.post(url + "step", json = game_action)
         if response.status_code != 200:
-            print(f"Error during step: {response.text}")
             last_observation = self.__get_observation()
             info = self.__get_info()
             return last_observation, -5, False, False, info # small penalty for illegal action (building tower on path or in occupied cell)
@@ -122,7 +121,7 @@ class TowerDefenseWorldEnv(gym.Env):
                 tower_type_mask[idx] = False
 
         # for illegal coordinates I can't disable the action directly because the mask is applied per-dimension so I would disable all horizontal or vertical cells
-        return [action_type_mask, tower_type_mask, x_coordinate_mask, y_coordinate_mask]
+        return np.concatenate([action_type_mask, tower_type_mask, x_coordinate_mask, y_coordinate_mask])
     
     # encodes the self game state into a tensor of shape self.observation_space.shape
     def __get_observation(self):
