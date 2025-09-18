@@ -1,4 +1,7 @@
 .venv/
-./checkpoints/
-./videos/
-./logs/
+checkpoints/
+videos/
+logs/
+__pycache__/
+training.log
+maskable_ppo_tower_defense.zip
