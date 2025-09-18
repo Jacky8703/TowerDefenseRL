@@ -2,5 +2,6 @@
 checkpoints/
 videos/
 __pycache__/
+models/
 training.log
 maskable_ppo_tower_defense.zip

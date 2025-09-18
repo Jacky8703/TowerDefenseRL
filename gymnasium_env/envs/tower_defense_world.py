@@ -201,12 +201,12 @@ class TowerDefenseWorldEnv(gym.Env):
         if new_towers_count > 0:
             for i in range(new_towers_count):
                 count = self.__count_path_cells_in_range(new_game_state["towers"][-i-1]) # new towers are at the end of the list
-                reward += count*2
+                reward += count
                 if count == 0:
                     reward -= 30
         # negative, spending money too often and game over, for the illegal actions the penalty is given in step()
         if new_game_state["money"] < old_state["money"]:
-            reward -= 4
+            reward -= 5
         if new_game_state["gameOver"]:
             reward -= 100
 
