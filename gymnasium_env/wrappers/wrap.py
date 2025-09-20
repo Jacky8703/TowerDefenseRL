@@ -1,7 +1,8 @@
-from gymnasium.wrappers import RecordEpisodeStatistics, RecordVideo, Autoreset
+from gymnasium.wrappers import RecordVideo, Autoreset
+from stable_baselines3.common.monitor import Monitor
 
-def wrap_env(env, episode_recording_gap, video_prefix):
-    env = RecordEpisodeStatistics(env)
-    env = RecordVideo(env, video_folder=f"videos/{video_prefix}/", name_prefix="training", episode_trigger=lambda e: e % episode_recording_gap == 0)
+def wrap_env(env, episode_recording_gap, prefix):
+    env = Monitor(env, f"monitor_csv/{prefix}")
+    env = RecordVideo(env, video_folder=f"videos/{prefix}/", name_prefix="training", episode_trigger=lambda e: e % episode_recording_gap == 0)
     env = Autoreset(env)
     return env
