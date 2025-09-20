@@ -1,3 +1,4 @@
+from copy import deepcopy
 import gymnasium as gym
 import requests
 import math
@@ -25,7 +26,7 @@ class TowerDefenseWorldEnv(gym.Env):
         self.map_horizontal_cells = int(self.game_info["map"]["width"] / cell_size)
         self.map_vertical_cells = int(self.game_info["map"]["height"] / cell_size)
 
-        self.action_space = spaces.MultiDiscrete([len(self.action_types), len(self.tower_types), self.map_horizontal_cells, self.map_vertical_cells]) # action, tower type, x, y 
+        self.action_space = spaces.MultiDiscrete([len(self.action_types), len(self.tower_types), self.map_horizontal_cells, self.map_vertical_cells]) # action, tower type, x, y
 
         self.path_cells_coordinates_normalized = self.__normalize_path_cells()
         self.max_towers = int(self.map_horizontal_cells * self.map_vertical_cells - self.game_info["map"]["path_length"] / cell_size)
@@ -47,21 +48,30 @@ class TowerDefenseWorldEnv(gym.Env):
 
         self.tower_type_to_index = {tower["type"]: idx for idx, tower in enumerate(self.tower_types)}
         self.enemy_type_to_index = {enemy_type: idx for idx, enemy_type in enumerate(self.game_info["waves"]["enemy_types"])}
+        self.current_episode_actions = [] # to log actions taken in the current episode
 
     # reset the environment and return the initial observation and info
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None) -> tuple[np.ndarray, dict]:
         response = requests.post(url + "reset")
         if response.status_code != 200:
             raise ConnectionError(f"Failed to reset game: {response.text}")
 
         self.game_state = response.json()
         observation = self.__get_observation()
+        self.current_episode_actions.clear() # clear actions log for new episode
         info = self.__get_info()
 
         return observation, info
 
     # perform the action and return the new observation, reward, terminated, truncated, info
-    def step(self, action):
+    def step(self, action: np.ndarray) -> tuple[np.ndarray, int, bool, bool, dict]:
+        # log the action taken
+        self.current_episode_actions.append({
+            "game_time": self.game_state["gameTime"],
+            "money": self.game_state["money"],
+            "action": action.tolist()
+        })
+
         action_index, tower_index, x, y = action
         game_action = self.action_types[action_index]
         if game_action["type"] == "BUILD_TOWER":
@@ -81,12 +91,12 @@ class TowerDefenseWorldEnv(gym.Env):
         observation = self.__get_observation()
         terminated = new_game_state["gameOver"] or new_game_state["waveNumber"] >= self.game_info["max_global_info"]["waveNumber"] or new_game_state["money"] >= self.game_info["max_global_info"]["money"]
         truncated = new_game_state["gameTime"] >= self.game_info["max_global_info"]["gameTime"]
-        info = self.__get_info()
+        info = self.__get_info(terminated or truncated)
 
         return observation, reward, terminated, truncated, info
 
     # returns the game state as an rgb array
-    def render(self):
+    def render(self) -> np.ndarray:
         black_frame = np.zeros((self.game_info["map"]["height"], self.game_info["map"]["width"], 3), dtype=np.uint8)
         if self.render_mode == "rgb_array":
             response = requests.get(url + "render")
@@ -104,7 +114,7 @@ class TowerDefenseWorldEnv(gym.Env):
         pass
 
     # create an action mask to disable illegal actions
-    def action_masks(self):
+    def action_masks(self) -> np.ndarray:
         action_type_mask = np.ones(len(self.action_types), dtype=bool)
         tower_type_mask = np.ones(len(self.tower_types), dtype=bool)
         x_coordinate_mask = np.ones(self.map_horizontal_cells, dtype=bool)
@@ -124,7 +134,7 @@ class TowerDefenseWorldEnv(gym.Env):
         return np.concatenate([action_type_mask, tower_type_mask, x_coordinate_mask, y_coordinate_mask])
     
     # encodes the self game state into a tensor of shape self.observation_space.shape
-    def __get_observation(self):
+    def __get_observation(self) -> np.ndarray:
         shape = self.observation_space.shape
         if shape is None:
             raise ValueError("Observation space shape is not defined")
@@ -158,13 +168,17 @@ class TowerDefenseWorldEnv(gym.Env):
 
         return observation
 
-    # additional info for debugging or logging, currently empty
-    def __get_info(self):
+    # additional info for debugging or logging
+    def __get_info(self, is_episode_over: bool = False) -> dict:
         info = {}
+        info["game_time"] = round(self.game_state["gameTime"])
         info["wave_number"] = self.game_state["waveNumber"]
         info["tower_counts"] = {tower_type["type"]: 0 for tower_type in self.tower_types}
         for tower in self.game_state["towers"]:
             info["tower_counts"][tower["type"]] += 1
+        if is_episode_over:
+            info["episode_actions"] = deepcopy(self.current_episode_actions)
+
         return info
 
     def __normalize_path_cells(self):
@@ -172,13 +186,14 @@ class TowerDefenseWorldEnv(gym.Env):
         for cell in self.game_info["map"]["path_cells"]:
             normalized_coordinates.append(cell["x"] / self.game_info["map"]["width"])
             normalized_coordinates.append(cell["y"] / self.game_info["map"]["height"])
+
         return normalized_coordinates
 
     # Worst case (assuming enemies remain alive, max number of enemies per wave and the slower spawns last):
     # - Time between waves: T = wave delay + max enemies per wave * spawn delay
     # - Number of actual waves: N = slower enemy time to complete path / T
     # - Number of total enemies: = N * max enemies per wave
-    def __calculate_total_enemies(self):
+    def __calculate_total_enemies(self) -> int:
         wave_delay = self.game_info["waves"]["wave_delay"]
         wave_max_enemies = self.game_info["waves"]["max_enemies"]
         spawn_delay = self.game_info["waves"]["spawn_delay"]
@@ -186,38 +201,41 @@ class TowerDefenseWorldEnv(gym.Env):
         total_enemies = int(slower_enemy_time*wave_max_enemies/(wave_delay+spawn_delay*wave_max_enemies))
         if slower_enemy_time < wave_delay:
             total_enemies = wave_max_enemies
+            
         return total_enemies
     
     # calculate the rewards based on the new game state
-    def __calculate_reward(self, new_game_state):
+    def __calculate_reward(self, new_game_state: dict) -> int:
         reward = 0
         old_state = self.game_state
         # positive, killing enemies and completing waves
         reward += max(0, len(old_state["enemies"]) - len(new_game_state["enemies"]))
         if new_game_state["waveNumber"] > old_state["waveNumber"]:
-            reward += new_game_state["waveNumber"]*2
-        # neutral, building towers (rewarded based on coverage, penalized if no coverage)
+            reward += new_game_state["waveNumber"]
+        # neutral, building towers (rewarded based on coverage, penalized if no coverage), saving money
         new_towers_count = len(new_game_state["towers"]) - len(old_state["towers"])
         if new_towers_count > 0:
             for i in range(new_towers_count):
-                count = self.__count_path_cells_in_range(new_game_state["towers"][-i-1]) # new towers are at the end of the list
-                reward += count
+                tower = new_game_state["towers"][-i-1] # new towers are at the end of the list
+                count = self.__count_path_cells_in_range(tower)
+                reward += math.sqrt(count * self.tower_types[self.tower_type_to_index[tower["type"]]]["dps"])*2
                 if count == 0:
                     reward -= 30
-        # negative, spending money too often and game over, for the illegal actions the penalty is given in step()
-        if new_game_state["money"] < old_state["money"]:
-            reward -= 5
+        cheapest_tower_cost = min(tower["cost"] for tower in self.tower_types)
+        reward += new_game_state["money"] - cheapest_tower_cost # reward the model for not spend the money immediately
+        # negative game over, for the illegal actions the penalty is given in step()
         if new_game_state["gameOver"]:
-            reward -= 100
+            reward -= 150
 
-        return reward
+        return round(reward)
 
     # counts how many path cells are in range of the tower
-    def __count_path_cells_in_range(self, tower): # si potrebbe ottimizzare partendo dalla posizione della torre e calcolando il numero di celle in range
+    def __count_path_cells_in_range(self, tower: dict) -> int: # si potrebbe ottimizzare partendo dalla posizione della torre e calcolando il numero di celle in range
         count = 0
         for path_cell in self.game_info["map"]["path_cells"]:
             distance = math.sqrt((tower["position"]["x"] - path_cell["x"])**2 + (tower["position"]["y"] - path_cell["y"])**2)
             tower_index = self.tower_type_to_index[tower["type"]]
             if distance < self.game_info["towers"][tower_index]["range"]:
                 count += 1
+
         return count
