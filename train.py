@@ -15,7 +15,7 @@ video_number = 10 # number of videos to record during training
 mean_time_fps = 220 # ~mean time/fps from tensor board, steps per second (obviously varies)
 mean_episode_steps = 700 # ~mean steps per episode from tensor board (also varies and it depends on the hours_to_play: more hours, better agent, longer episodes)
 
-training_steps = mean_time_fps*hours_to_play*3600 # total number of training steps
+training_steps = round(mean_time_fps*hours_to_play*3600) # total number of training steps
 episode_recording_gap = (training_steps/mean_episode_steps) // video_number  # one episode = one game
 
 env_name = "gymnasium_env/TowerDefenseWorld-v0"
@@ -30,9 +30,9 @@ logging.basicConfig(
 env = gym.make(env_name)
 env = wrap_env(env, episode_recording_gap, prefix)
 
-# save 10 checkpoints
+# save 3 checkpoints
 checkpoint_callback = CheckpointCallback(
-  save_freq=training_steps//10,
+  save_freq=training_steps//3,
   save_path=f"./models/{prefix}/checkpoints/",
   name_prefix="maskable_ppo_tower_defense",
 )
@@ -59,7 +59,7 @@ try:
 
     best_performance_data = save_actions_callback.get_best_agent_performance()
     with open(f"./models/{prefix}/best_episode_actions.json", "w") as f:
-        json.dump(best_performance_data, f, indent=4)
+        json.dump(best_performance_data, f, indent=2)
     logging.info("Best episode actions saved.")
 except Exception as e:
     logging.error(f"An error occurred during training: {e}")

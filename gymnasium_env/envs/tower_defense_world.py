@@ -66,11 +66,7 @@ class TowerDefenseWorldEnv(gym.Env):
     # perform the action and return the new observation, reward, terminated, truncated, info
     def step(self, action: np.ndarray) -> tuple[np.ndarray, int, bool, bool, dict]:
         # log the action taken
-        self.current_episode_actions.append({
-            "game_time": self.game_state["gameTime"],
-            "money": self.game_state["money"],
-            "action": action.tolist()
-        })
+        self.current_episode_actions.append(action.tolist())
 
         action_index, tower_index, x, y = action
         game_action = self.action_types[action_index]
