@@ -33,7 +33,7 @@ env = wrap_env(env, episode_recording_gap, prefix)
 # save 10 checkpoints
 checkpoint_callback = CheckpointCallback(
   save_freq=training_steps//10,
-  save_path=f"./checkpoints/{prefix}/",
+  save_path=f"./models/{prefix}/checkpoints/",
   name_prefix="maskable_ppo_tower_defense",
 )
 # custom tensorboard callback to log wave number and tower counts
