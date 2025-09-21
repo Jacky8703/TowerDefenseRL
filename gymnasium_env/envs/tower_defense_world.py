@@ -48,7 +48,6 @@ class TowerDefenseWorldEnv(gym.Env):
 
         self.tower_type_to_index = {tower["type"]: idx for idx, tower in enumerate(self.tower_types)}
         self.enemy_type_to_index = {enemy_type: idx for idx, enemy_type in enumerate(self.game_info["waves"]["enemy_types"])}
-        self.current_episode_actions = [] # to log actions taken in the current episode
 
     # reset the environment and return the initial observation and info
     def reset(self, seed=None, options=None) -> tuple[np.ndarray, dict]:
@@ -58,7 +57,7 @@ class TowerDefenseWorldEnv(gym.Env):
 
         self.game_state = response.json()
         observation = self.__get_observation()
-        self.current_episode_actions.clear() # clear actions log for new episode
+        self.current_episode_actions = [] # to log actions taken in the current episode
         info = self.__get_info()
 
         return observation, info
@@ -185,7 +184,7 @@ class TowerDefenseWorldEnv(gym.Env):
 
         return normalized_coordinates
 
-    # Worst case (assuming enemies remain alive, max number of enemies per wave and the slower spawns last):
+    # worst case (assuming enemies remain alive, max number of enemies per wave and the slower spawns last):
     # - Time between waves: T = wave delay + max enemies per wave * spawn delay
     # - Number of actual waves: N = slower enemy time to complete path / T
     # - Number of total enemies: = N * max enemies per wave
@@ -200,26 +199,41 @@ class TowerDefenseWorldEnv(gym.Env):
             
         return total_enemies
     
+    # calculate the total "power" of all towers on the board
+    def __get_board_power(self, towers: list) -> float:
+        total_power = 0
+        for tower in towers:
+            tower_info = self.tower_types[self.tower_type_to_index[tower["type"]]]
+            path_coverage = self.__count_path_cells_in_range(tower)
+            power = tower_info["cost"] * tower_info["dps"] * path_coverage
+            total_power += power
+        return total_power
+    
     # calculate the rewards based on the new game state
     def __calculate_reward(self, new_game_state: dict) -> int:
         reward = 0
         old_state = self.game_state
-        # positive, killing enemies and completing waves
-        reward += max(0, len(old_state["enemies"]) - len(new_game_state["enemies"]))
+        # + killing enemies
+        reward += max(0, len(old_state["enemies"]) - len(new_game_state["enemies"])) * 2
+
+        # + completing waves
         if new_game_state["waveNumber"] > old_state["waveNumber"]:
-            reward += new_game_state["waveNumber"]
-        # neutral, building towers (rewarded based on coverage, penalized if no coverage), saving money
+            reward += new_game_state["waveNumber"] * 2
+
+        # + increasing the total power of the board
+        old_power = self.__get_board_power(old_state["towers"])
+        new_power = self.__get_board_power(new_game_state["towers"])
+        reward += (new_power - old_power) / 1000
+
+        # building towers (rewarded based on coverage, penalized if no coverage)
         new_towers_count = len(new_game_state["towers"]) - len(old_state["towers"])
         if new_towers_count > 0:
             for i in range(new_towers_count):
                 tower = new_game_state["towers"][-i-1] # new towers are at the end of the list
-                count = self.__count_path_cells_in_range(tower)
-                reward += math.sqrt(count * self.tower_types[self.tower_type_to_index[tower["type"]]]["dps"])*2
-                if count == 0:
+                if self.__count_path_cells_in_range(tower) == 0:
                     reward -= 30
-        cheapest_tower_cost = min(tower["cost"] for tower in self.tower_types)
-        reward += new_game_state["money"] - cheapest_tower_cost # reward the model for not spend the money immediately
-        # negative game over, for the illegal actions the penalty is given in step()
+
+        # - game over, for the illegal actions the penalty is given in step()
         if new_game_state["gameOver"]:
             reward -= 150
 

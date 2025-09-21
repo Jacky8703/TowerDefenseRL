@@ -9,11 +9,11 @@ from gymnasium_env.wrappers.wrap import wrap_env
 from custom_callbacks.tensor_board_info import TensorboardInfoCallback
 from custom_callbacks.save_agent_actions import SaveAgentActionsCallback
 
-hours_to_play = 0.5
-video_number = 10 # number of videos to record during training
+hours_to_play = 1.5
+video_number = 5 # number of videos to record during training
 
-mean_time_fps = 220 # ~mean time/fps from tensor board, steps per second (obviously varies)
-mean_episode_steps = 700 # ~mean steps per episode from tensor board (also varies and it depends on the hours_to_play: more hours, better agent, longer episodes)
+mean_time_fps = 320 # ~mean time/fps from tensor board, steps per second (obviously varies)
+mean_episode_steps = 1200 # ~mean steps per episode from tensor board (also varies and it depends on the hours_to_play: more hours, better agent, longer episodes)
 
 training_steps = round(mean_time_fps*hours_to_play*3600) # total number of training steps
 episode_recording_gap = (training_steps/mean_episode_steps) // video_number  # one episode = one game
@@ -59,7 +59,7 @@ try:
 
     best_performance_data = save_actions_callback.get_best_agent_performance()
     with open(f"./models/{prefix}/best_episode_actions.json", "w") as f:
-        json.dump(best_performance_data, f, indent=2)
+        json.dump(best_performance_data, f)
     logging.info("Best episode actions saved.")
 except Exception as e:
     logging.error(f"An error occurred during training: {e}")
