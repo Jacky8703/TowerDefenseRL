@@ -64,15 +64,15 @@ class TowerDefenseWorldEnv(gym.Env):
 
     # perform the action and return the new observation, reward, terminated, truncated, info
     def step(self, action: np.ndarray) -> tuple[np.ndarray, int, bool, bool, dict]:
-        # log the action taken
-        self.current_episode_actions.append(action.tolist())
-
         action_index, tower_index, x, y = action
         game_action = self.action_types[action_index]
         if game_action["type"] == "BUILD_TOWER":
             game_action["towerType"] = self.tower_types[tower_index]["type"]
             game_action["position"]["x"] = self.game_info["map"]["cell_size"]/2 + self.game_info["map"]["cell_size"]*x
             game_action["position"]["y"] = self.game_info["map"]["cell_size"]/2 + self.game_info["map"]["cell_size"]*y
+
+        # log the action taken
+        self.current_episode_actions.append(deepcopy(game_action))
 
         response = requests.post(url + "step", json = game_action)
         if response.status_code != 200:
