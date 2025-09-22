@@ -10,7 +10,7 @@ from gymnasium import spaces
 url = "http://localhost:3000/"
 
 class TowerDefenseWorldEnv(gym.Env):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
     
     # define action_space and observation_space
     def __init__(self, render_mode="rgb_array"):
@@ -199,43 +199,32 @@ class TowerDefenseWorldEnv(gym.Env):
             
         return total_enemies
     
-    # calculate the total "power" of all towers on the board
-    def __get_board_power(self, towers: list) -> float:
-        total_power = 0
-        for tower in towers:
-            tower_info = self.tower_types[self.tower_type_to_index[tower["type"]]]
-            path_coverage = self.__count_path_cells_in_range(tower)
-            power = tower_info["cost"] * tower_info["dps"] * path_coverage
-            total_power += power
-        return total_power
-    
     # calculate the rewards based on the new game state
     def __calculate_reward(self, new_game_state: dict) -> int:
         reward = 0
         old_state = self.game_state
         # + killing enemies
-        reward += max(0, len(old_state["enemies"]) - len(new_game_state["enemies"])) * 2
+        reward += max(0, len(old_state["enemies"]) - len(new_game_state["enemies"]))
 
         # + completing waves
         if new_game_state["waveNumber"] > old_state["waveNumber"]:
-            reward += new_game_state["waveNumber"] * 2
+            reward += new_game_state["waveNumber"]*5
 
-        # + increasing the total power of the board
-        old_power = self.__get_board_power(old_state["towers"])
-        new_power = self.__get_board_power(new_game_state["towers"])
-        reward += (new_power - old_power) / 1000
-
-        # building towers (rewarded based on coverage, penalized if no coverage)
+        # building towers (rewarded based on coverage and type, penalized if no coverage)
         new_towers_count = len(new_game_state["towers"]) - len(old_state["towers"])
         if new_towers_count > 0:
             for i in range(new_towers_count):
                 tower = new_game_state["towers"][-i-1] # new towers are at the end of the list
-                if self.__count_path_cells_in_range(tower) == 0:
+                tower_info = self.tower_types[self.tower_type_to_index[tower["type"]]]
+                path_coverage = self.__count_path_cells_in_range(tower)
+                if path_coverage == 0:
                     reward -= 30
+                else:
+                    reward += tower_info["cost"] * tower_info["dps"] * path_coverage / 500
 
         # - game over, for the illegal actions the penalty is given in step()
         if new_game_state["gameOver"]:
-            reward -= 150
+            reward -= 100
 
         return round(reward)
 
