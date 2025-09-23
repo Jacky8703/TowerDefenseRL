@@ -22,18 +22,19 @@ class TowerDefenseWorldEnv(gym.Env):
         self.game_info = response.json()
         self.action_types = self.game_info["actions"]
         self.tower_types = self.game_info["towers"]
-        cell_size = self.game_info["map"]["cell_size"]
-        self.map_horizontal_cells = int(self.game_info["map"]["width"] / cell_size)
-        self.map_vertical_cells = int(self.game_info["map"]["height"] / cell_size)
+        self.cell_size = self.game_info["map"]["cell_size"]
+        self.map_horizontal_cells = self.game_info["map"]["width"] // self.cell_size
+        self.map_vertical_cells = self.game_info["map"]["height"] // self.cell_size
 
         self.action_space = spaces.MultiDiscrete([len(self.action_types), len(self.tower_types), self.map_horizontal_cells, self.map_vertical_cells]) # action, tower type, x, y
 
         self.path_cells_coordinates_normalized = self.__normalize_path_cells()
-        self.max_towers = int(self.map_horizontal_cells * self.map_vertical_cells - self.game_info["map"]["path_length"] / cell_size)
+        self.max_towers = self.map_horizontal_cells * self.map_vertical_cells - self.game_info["map"]["path_length"] // self.cell_size
         self.max_enemies = self.__calculate_total_enemies()
 
+        #self.global_feature_count = 4+self.map_horizontal_cells*self.map_vertical_cells # game time, wave number, money, game over, grid map
         self.global_feature_count = 4+len(self.path_cells_coordinates_normalized) # game time, wave number, money, game over, path cells coordinates
-        self.features_per_tower = 4+len(self.tower_types) # active, x, y, attack cooldown, one-hot encoding type
+        self.features_per_tower = 5+len(self.tower_types) # active, x, y, attack cooldown, dps, one-hot encoding type
         self.tower_feature_count = self.max_towers * self.features_per_tower
         self.features_per_enemy = 5+len(self.game_info["waves"]["enemy_types"]) # active, x, y, health, path progress, one-hot encoding type
         self.enemy_feature_count = self.max_enemies * self.features_per_enemy
@@ -49,6 +50,7 @@ class TowerDefenseWorldEnv(gym.Env):
         self.tower_type_to_index = {tower["type"]: idx for idx, tower in enumerate(self.tower_types)}
         self.enemy_type_to_index = {enemy_type: idx for idx, enemy_type in enumerate(self.game_info["waves"]["enemy_types"])}
         self.most_expensive_tower_cost = max(tower["cost"] for tower in self.tower_types)
+        self.max_tower_dps = max(tower["dps"] for tower in self.tower_types)
 
     # reset the environment and return the initial observation and info
     def reset(self, seed=None, options=None) -> tuple[np.ndarray, dict]:
@@ -69,8 +71,8 @@ class TowerDefenseWorldEnv(gym.Env):
         game_action = self.action_types[action_index]
         if game_action["type"] == "BUILD_TOWER":
             game_action["towerType"] = self.tower_types[tower_index]["type"]
-            game_action["position"]["x"] = self.game_info["map"]["cell_size"]/2 + self.game_info["map"]["cell_size"]*x
-            game_action["position"]["y"] = self.game_info["map"]["cell_size"]/2 + self.game_info["map"]["cell_size"]*y
+            game_action["position"]["x"] = self.cell_size/2 + self.cell_size*x
+            game_action["position"]["y"] = self.cell_size/2 + self.cell_size*y
 
         # log the action taken
         self.current_episode_actions.append(deepcopy(game_action))
@@ -142,6 +144,7 @@ class TowerDefenseWorldEnv(gym.Env):
         observation[2] = self.game_state["money"] / self.game_info["max_global_info"]["money"]
         observation[3] = self.game_state["gameOver"]
         observation[4:4+len(self.path_cells_coordinates_normalized)] = self.path_cells_coordinates_normalized
+        #observation[4:4+self.map_horizontal_cells*self.map_vertical_cells] = self.__calculate_grid_map()
 
         # tower features normalized
         for idx, tower in enumerate(self.game_state["towers"]):
@@ -150,7 +153,8 @@ class TowerDefenseWorldEnv(gym.Env):
             observation[offset+1] = tower["position"]["x"] / self.game_info["map"]["width"] # normalized x
             observation[offset+2] = tower["position"]["y"] / self.game_info["map"]["height"] # normalized y
             observation[offset+3] = tower["attackCooldown"] / self.game_info["slower_tower_sample"]["attackCooldown"] # normalized attack cooldown
-            observation[offset+4+self.tower_type_to_index[tower["type"]]] = 1 # one-hot encoding type
+            observation[offset+4] = self.tower_types[self.tower_type_to_index[tower["type"]]]["dps"] / self.max_tower_dps # normalized dps
+            observation[offset+5+self.tower_type_to_index[tower["type"]]] = 1 # one-hot encoding type
 
         # enemy features normalized
         for idx, enemy in enumerate(self.game_state["enemies"]):
@@ -177,13 +181,27 @@ class TowerDefenseWorldEnv(gym.Env):
 
         return info
 
-    def __normalize_path_cells(self):
+    def __normalize_path_cells(self) -> list[float]:
         normalized_coordinates = []
         for cell in self.game_info["map"]["path_cells"]:
             normalized_coordinates.append(cell["x"] / self.game_info["map"]["width"])
             normalized_coordinates.append(cell["y"] / self.game_info["map"]["height"])
 
         return normalized_coordinates
+    
+    def __calculate_grid_map(self) -> list[float]:
+        grid_map = [0.0] * (self.map_horizontal_cells * self.map_vertical_cells) # 0 = empty, 0.5 = path, 1 = tower
+        for cell in self.game_info["map"]["path_cells"]:
+            x_index = cell["x"] // self.cell_size
+            y_index = cell["y"] // self.cell_size
+            grid_map[y_index * self.map_horizontal_cells + x_index] = 0.5 # mark path cells (never changes)
+
+        for tower in self.game_state["towers"]:
+            x_index = tower["position"]["x"] // self.cell_size
+            y_index = tower["position"]["y"] // self.cell_size
+            grid_map[y_index * self.map_horizontal_cells + x_index] = 1.0 # mark tower cells
+
+        return grid_map
 
     # worst case (assuming enemies remain alive, max number of enemies per wave and the slower spawns last):
     # - Time between waves: T = wave delay + max enemies per wave * spawn delay
