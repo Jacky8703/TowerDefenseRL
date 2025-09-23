@@ -48,6 +48,7 @@ class TowerDefenseWorldEnv(gym.Env):
 
         self.tower_type_to_index = {tower["type"]: idx for idx, tower in enumerate(self.tower_types)}
         self.enemy_type_to_index = {enemy_type: idx for idx, enemy_type in enumerate(self.game_info["waves"]["enemy_types"])}
+        self.most_expensive_tower_cost = max(tower["cost"] for tower in self.tower_types)
 
     # reset the environment and return the initial observation and info
     def reset(self, seed=None, options=None) -> tuple[np.ndarray, dict]:
@@ -78,7 +79,7 @@ class TowerDefenseWorldEnv(gym.Env):
         if response.status_code != 200:
             last_observation = self.__get_observation()
             info = self.__get_info()
-            return last_observation, -5, False, False, info # small penalty for illegal action (building tower on path or in occupied cell)
+            return last_observation, -1, False, False, info # small penalty for illegal action (building tower on path or in occupied cell)
 
         new_game_state = response.json()
         reward = self.__calculate_reward(new_game_state)
@@ -208,9 +209,9 @@ class TowerDefenseWorldEnv(gym.Env):
 
         # + completing waves
         if new_game_state["waveNumber"] > old_state["waveNumber"]:
-            reward += new_game_state["waveNumber"]*5
+            reward += new_game_state["waveNumber"]*2
 
-        # building towers (rewarded based on coverage and type, penalized if no coverage)
+        # building towers + based on coverage and type, - penalized if no coverage
         new_towers_count = len(new_game_state["towers"]) - len(old_state["towers"])
         if new_towers_count > 0:
             for i in range(new_towers_count):
@@ -220,7 +221,11 @@ class TowerDefenseWorldEnv(gym.Env):
                 if path_coverage == 0:
                     reward -= 30
                 else:
-                    reward += tower_info["cost"] * tower_info["dps"] * path_coverage / 500
+                    reward += tower_info["cost"] * tower_info["dps"] * path_coverage / 100
+
+        # - hoarding money uselessly
+        if new_game_state["money"] > self.most_expensive_tower_cost:
+            reward -= (new_game_state["money"] - self.most_expensive_tower_cost)
 
         # - game over, for the illegal actions the penalty is given in step()
         if new_game_state["gameOver"]:
