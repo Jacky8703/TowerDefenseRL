@@ -33,7 +33,7 @@ class TowerDefenseWorldEnv(gym.Env):
         self.max_enemies = self.__calculate_total_enemies()
 
         #self.global_feature_count = 4+self.map_horizontal_cells*self.map_vertical_cells # game time, wave number, money, game over, grid map
-        self.global_feature_count = 4+len(self.path_cells_coordinates_normalized) # game time, wave number, money, game over, path cells coordinates
+        self.global_feature_count = 5+len(self.path_cells_coordinates_normalized) # game time, wave number, money, lives, game over, path cells coordinates
         self.features_per_tower = 5+len(self.tower_types) # active, x, y, attack cooldown, dps, one-hot encoding type
         self.tower_feature_count = self.max_towers * self.features_per_tower
         self.features_per_enemy = 5+len(self.game_info["waves"]["enemy_types"]) # active, x, y, health, path progress, one-hot encoding type
@@ -142,8 +142,9 @@ class TowerDefenseWorldEnv(gym.Env):
         observation[0] = self.game_state["gameTime"] / self.game_info["max_global_info"]["gameTime"]
         observation[1] = self.game_state["waveNumber"] / self.game_info["max_global_info"]["waveNumber"]
         observation[2] = self.game_state["money"] / self.game_info["max_global_info"]["money"]
-        observation[3] = self.game_state["gameOver"]
-        observation[4:4+len(self.path_cells_coordinates_normalized)] = self.path_cells_coordinates_normalized
+        observation[3] = self.game_state["lives"] / self.game_info["max_global_info"]["lives"]
+        observation[4] = self.game_state["gameOver"]
+        observation[5:5+len(self.path_cells_coordinates_normalized)] = self.path_cells_coordinates_normalized
         #observation[4:4+self.map_horizontal_cells*self.map_vertical_cells] = self.__calculate_grid_map()
 
         # tower features normalized
@@ -244,6 +245,9 @@ class TowerDefenseWorldEnv(gym.Env):
         # - hoarding money uselessly
         if new_game_state["money"] > self.most_expensive_tower_cost:
             reward -= (new_game_state["money"] - self.most_expensive_tower_cost)
+
+        # - lives lost
+        reward -= (old_state["lives"] - new_game_state["lives"]) * 20
 
         # - game over, for the illegal actions the penalty is given in step()
         if new_game_state["gameOver"]:
