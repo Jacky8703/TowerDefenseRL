@@ -252,12 +252,22 @@ class TowerDefenseWorldEnv(gym.Env):
         return round(reward)
 
     # counts how many path cells are in range of the tower
-    def __count_path_cells_in_range(self, tower: dict) -> int: # si potrebbe ottimizzare partendo dalla posizione della torre e calcolando il numero di celle in range
+    def __count_path_cells_in_range(self, tower: dict) -> int:
         count = 0
+        tower_index = self.tower_type_to_index[tower["type"]]
+        tower_range = self.game_info["towers"][tower_index]["range"]
+
+        # create a bounding box to quickly discard most path cells
+        min_x = tower["position"]["x"] - tower_range
+        max_x = tower["position"]["x"] + tower_range
+        min_y = tower["position"]["y"] - tower_range
+        max_y = tower["position"]["y"] + tower_range
+
         for path_cell in self.game_info["map"]["path_cells"]:
-            distance = math.sqrt((tower["position"]["x"] - path_cell["x"])**2 + (tower["position"]["y"] - path_cell["y"])**2)
-            tower_index = self.tower_type_to_index[tower["type"]]
-            if distance < self.game_info["towers"][tower_index]["range"]:
-                count += 1
+            # check if the cell is within the bounding box
+            if min_x < path_cell["x"] < max_x and min_y < path_cell["y"] < max_y:
+                distance = (tower["position"]["x"] - path_cell["x"])**2 + (tower["position"]["y"] - path_cell["y"])**2
+                if distance < tower_range**2:
+                    count += 1
 
         return count
