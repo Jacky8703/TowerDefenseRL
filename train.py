@@ -10,13 +10,13 @@ from custom_callbacks.tensor_board_info import TensorboardInfoCallback
 from custom_callbacks.save_agent_actions import SaveAgentActionsCallback
 import argparse
 
-hours_to_play = 12
+hours_to_train = 12
 video_number = 10 # number of videos to record during training
 
 mean_time_fps = 330 # ~mean time/fps from tensor board, steps per second (obviously varies)
-mean_episode_steps = 1400 # ~mean steps per episode from tensor board (also varies and it depends on the hours_to_play: more hours, better agent, longer episodes)
+mean_episode_steps = 1400 # ~mean steps per episode from tensor board (also varies and it depends on the hours_to_train: more hours, better agent, longer episodes)
 
-training_steps = round(mean_time_fps*hours_to_play*3600) # total number of training steps
+training_steps = round(mean_time_fps*hours_to_train*3600) # total number of training steps
 episode_recording_gap = (training_steps/mean_episode_steps) // video_number  # one episode = one game
 
 env_name = "gymnasium_env/TowerDefenseWorld-v0"
@@ -59,7 +59,7 @@ def main(load_model_path):
         start = datetime.datetime.now()
         # do not reset the timestep number if loading a model
         model.learn(total_timesteps=training_steps, callback=[checkpoint_callback, tensorboard_info_callback, save_actions_callback], reset_num_timesteps=not load_model_path)
-        logging.info(f"Model training completed in {(datetime.datetime.now() - start).total_seconds()/3600:.2f} hours ({hours_to_play} planned).")
+        logging.info(f"Model training completed in {(datetime.datetime.now() - start).total_seconds()/3600:.2f} hours ({hours_to_train} planned).")
 
         model.save(f"./models/{prefix}/maskable_ppo_tower_defense.zip")
         logging.info("Model saved.")
