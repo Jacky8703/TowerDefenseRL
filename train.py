@@ -21,6 +21,7 @@ training_steps = round(mean_time_fps*hours_to_train*3600) # total number of trai
 episode_recording_gap = (training_steps/mean_episode_steps) // video_number  # one episode = one game
 
 env_name = "gymnasium_env/TowerDefenseWorld-v0"
+seed = 87
 
 def main(load_model_path, random_maps_path):
     prefix = datetime.datetime.now().strftime("%d.%m.%Y_%H.%M")
@@ -36,7 +37,7 @@ def main(load_model_path, random_maps_path):
     if random_maps_path:
         with open(random_maps_path, "r") as f:
             data = json.load(f)
-        env.reset(seed=87) # set seed for reproducibility (same seed -> same map sequence)
+        env.reset(seed=seed) # set seed for reproducibility (same seed -> same map sequence)
         env = RandomMapWrapper(env, map_list=data)
 
     # save 3 checkpoints
@@ -52,7 +53,7 @@ def main(load_model_path, random_maps_path):
 
     try:
         logging.info(f"--- Starting New Training Run ---")
-        logging.info(f"Environment: {env_name}")
+        logging.info(f"Environment: {env_name} (reset seed = {seed})")
         logging.info(f"Total Timesteps: {training_steps} (~{training_steps*0.1/3600:.2f} hours of playing)")
         logging.info(f"Video Recording Period: {episode_recording_gap} games")
 

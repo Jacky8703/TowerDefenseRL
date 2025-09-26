@@ -1,3 +1,4 @@
+import datetime
 import requests
 from io import BytesIO
 from PIL import Image
@@ -8,10 +9,25 @@ import argparse
 import os
 
 SERVER_URL = "http://localhost:3000"
+SET_MAP_ENDPOINT = f"{SERVER_URL}/set-map"
 RESET_ENDPOINT = f"{SERVER_URL}/reset"
 STEP_ENDPOINT = f"{SERVER_URL}/step"
 RENDER_ENDPOINT = f"{SERVER_URL}/render"
 PLAYBACK_SPEED_MS = 10  # delay between frames in milliseconds
+DEFAULT_MAP_WAYPOINTS = [
+    { "x": 75, "y": 25 },
+    { "x": 75, "y": 325 },
+    { "x": 225, "y": 325 },
+    { "x": 225, "y": 475 },
+    { "x": 375, "y": 475 },
+    { "x": 375, "y": 125 },
+    { "x": 825, "y": 125 },
+    { "x": 825, "y": 275 },
+    { "x": 525, "y": 275 },
+    { "x": 525, "y": 525 },
+    { "x": 725, "y": 525 },
+    { "x": 725, "y": 575 }
+]
 
 def main(actions_file, save_frames, load_dir):
     """
@@ -35,13 +51,14 @@ def main(actions_file, save_frames, load_dir):
                 print(f"Error: No image files found in '{load_dir}'")
                 return
 
+            start_time = datetime.datetime.now()
             for i, filename in enumerate(image_files):
                 print(f"Loading frame {i + 1}/{len(image_files)}...", end='\r')
                 frame_path = os.path.join(load_dir, filename)
                 frame = cv2.imread(frame_path)
                 if frame is not None:
                     frames.append(frame)
-            print(f"Successfully loaded {len(frames)} frames.")
+            print(f"Successfully loaded {len(frames)} frames in {(datetime.datetime.now() - start_time).seconds} seconds.")
         except Exception as e:
             print(f"An error occurred while loading frames: {e}")
             return
@@ -64,12 +81,12 @@ def main(actions_file, save_frames, load_dir):
             base_dir = os.path.dirname(os.path.abspath(actions_file))
             # Create the path for the 'best_frames' folder
             save_dir = os.path.join(base_dir, "best_frames")
-            print(f"Frames will be saved to: {save_dir}")
-            os.makedirs(save_dir, exist_ok=True)
 
         try:
+            requests.post(SET_MAP_ENDPOINT, json=DEFAULT_MAP_WAYPOINTS).raise_for_status()
             requests.post(RESET_ENDPOINT).raise_for_status()
 
+            start_time = datetime.datetime.now()
             for i, action in enumerate(actions):
                 print(f"Processing action {i + 1}/{len(actions)}...", end='\r')
                 response = requests.post(STEP_ENDPOINT, json=action)
@@ -80,18 +97,27 @@ def main(actions_file, save_frames, load_dir):
                 response.raise_for_status()
                 
                 render_response = requests.get(RENDER_ENDPOINT)
+                if render_response.status_code == 400:
+                    error_msg = render_response.json()["message"]
+                    print(f"\nError rendering frame at action {i + 1}: {error_msg}. Stopping.")
+                    break
                 render_response.raise_for_status()
                 
                 image_bytes = BytesIO(render_response.content)
                 image = Image.open(image_bytes).convert("RGB")
                 frame = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
                 frames.append(frame)
-                
-                if save_dir:
-                    frame_filename = os.path.join(save_dir, f"frame_{i:05d}.png")
-                    cv2.imwrite(frame_filename, frame)
             
-            print(f"\nFrame collection complete. Collected {len(frames)} frames.")
+            print(f"\nFrame collection complete. Collected {len(frames)} frames in {(datetime.datetime.now() - start_time).seconds} seconds.")
+            # save only after collecting all frames
+            if save_dir:
+                print(f"Frames will be saved to: {save_dir}")
+                os.makedirs(save_dir, exist_ok=True)
+                for i, frame in enumerate(frames):
+                    print(f"Saving frame {i + 1}/{len(frames)}...", end='\r')
+                    frame_filename = os.path.join(save_dir, f"frame_{i:04d}.png")
+                    cv2.imwrite(frame_filename, frame)
+
         except Exception as e:
             print(f"\nAn error occurred during frame collection: {e}")
             return
