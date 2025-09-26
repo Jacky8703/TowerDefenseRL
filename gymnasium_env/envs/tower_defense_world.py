@@ -54,6 +54,7 @@ class TowerDefenseWorldEnv(gym.Env):
 
     # reset the environment and return the initial observation and info
     def reset(self, seed=None, options=None) -> tuple[np.ndarray, dict]:
+        super().reset(seed=seed)
         response = requests.post(url + "reset")
         if response.status_code != 200:
             raise ConnectionError(f"Failed to reset game: {response.text}")
@@ -62,7 +63,7 @@ class TowerDefenseWorldEnv(gym.Env):
         observation = self.__get_observation()
         self.current_episode_actions = [] # to log actions taken in the current episode
         info = self.__get_info()
-
+        
         return observation, info
 
     # perform the action and return the new observation, reward, terminated, truncated, info

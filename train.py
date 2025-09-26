@@ -5,6 +5,7 @@ import logging
 import datetime
 from stable_baselines3.common.callbacks import CheckpointCallback
 from sb3_contrib import MaskablePPO
+from gymnasium_env.wrappers.random_map_wrapper import RandomMapWrapper
 from gymnasium_env.wrappers.wrap import wrap_env
 from custom_callbacks.tensor_board_info import TensorboardInfoCallback
 from custom_callbacks.save_agent_actions import SaveAgentActionsCallback
@@ -21,7 +22,7 @@ episode_recording_gap = (training_steps/mean_episode_steps) // video_number  # o
 
 env_name = "gymnasium_env/TowerDefenseWorld-v0"
 
-def main(load_model_path):
+def main(load_model_path, custom_maps_path):
     prefix = datetime.datetime.now().strftime("%d.%m.%Y_%H.%M")
 
     logging.basicConfig(
@@ -31,6 +32,12 @@ def main(load_model_path):
     )
     env = gym.make(env_name)
     env = wrap_env(env, episode_recording_gap, prefix)
+
+    if custom_maps_path:
+        with open(custom_maps_path, "r") as f:
+            data = json.load(f)
+        env = RandomMapWrapper(env, map_list=data)
+        env.reset(seed=87) # set seed for reproducibility
 
     # save 3 checkpoints
     checkpoint_callback = CheckpointCallback(
@@ -75,8 +82,9 @@ def main(load_model_path):
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Train a MaskablePPO agent on the Tower Defense environment.")
     parser.add_argument("--load-model", help="Optional path to the model zip file.")
+    parser.add_argument("--custom-random-maps", help="Optional path to the custom maps JSON file for random map training.")
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_arguments()
-    main(args.load_model)
+    main(args.load_model, args.custom_random_maps)
